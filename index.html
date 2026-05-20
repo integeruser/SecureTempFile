@@ -1,0 +1,399 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>SecureTempFile</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      align-items: center;
+      background: #f6f8fb;
+      color: #1f2937;
+      display: flex;
+      flex-direction: column;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      gap: 20px;
+      margin: 0 auto;
+      max-width: 640px;
+      padding: 24px;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 6vw, 3.5rem);
+      margin: 0;
+    }
+
+    h1 a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    section {
+      background: #fff;
+      border: 1px solid #dbe3ef;
+      border-radius: 8px;
+      box-shadow: 0 12px 30px rgba(31, 41, 55, 0.08);
+      max-width: 520px;
+      padding: 12px;
+      width: 100%;
+    }
+
+    input,
+    button {
+      border: 1px solid #c8d3e1;
+      border-radius: 6px;
+      display: block;
+      font: inherit;
+      margin: 12px auto;
+      max-width: 100%;
+      padding: 10px 12px;
+      width: 100%;
+    }
+
+    button {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: #fff;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.4;
+    }
+
+    a {
+      color: #1d4ed8;
+      overflow-wrap: anywhere;
+    }
+
+    footer {
+      color: #6b7280;
+      font-size: 0.9rem;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <h1><a id="homeLink" href="./">SecureTempFile</a></h1>
+
+  <section id="uploadView">
+    <input id="passphrase" type="text" placeholder="Enter passphrase (or include it after # in the URL)">
+    <input id="file" type="file">
+    <button id="upload" disabled>Encrypt & Upload</button>
+    <p id="uploadMessage"></p>
+    <button id="copyUrl" class="hidden">Copy Link to Clipboard</button>
+  </section>
+
+  <section id="downloadView" class="hidden">
+    <p id="downloadMessage"></p>
+  </section>
+
+  <footer>
+    <a href="https://github.com/integeruser/SecureTempFile"> Ayo what's this?</a>
+  </footer>
+
+  <script>
+    const uploadView = document.getElementById('uploadView');
+    const downloadView = document.getElementById('downloadView');
+    const homeLink = document.getElementById('homeLink');
+    const passphrase = document.getElementById('passphrase');
+    const fileInput = document.getElementById('file');
+    const btn = document.getElementById('upload');
+    const uploadMessage = document.getElementById('uploadMessage');
+    const copyUrlBtn = document.getElementById('copyUrl');
+
+    const downloadMessage = document.getElementById('downloadMessage');
+    const tempfileBaseUrl = 'https://tempfile.org';
+    const salt = new Uint8Array([0x36, 0x61, 0x45, 0x77, 0x31, 0x90, 0x24, 0x79, 0x43, 0x90, 0x98, 0x42, 0x54, 0x54, 0x61, 0x03]);
+    const iv = new Uint8Array([0x69, 0x76, 0x31, 0x33, 0x51, 0x12, 0x94, 0x48, 0x37, 0x02, 0x39, 0x30]);
+    let currentUploadUrl = '';
+
+    const fileIdFromUrl = extractFileId(new URLSearchParams(window.location.search).get('f'));
+
+    function updateUploadButtonState() {
+      btn.disabled = !passphrase.value.trim() || !fileInput.files.length;
+    }
+
+    function getHashPassphrase() {
+      if (!window.location.hash) {
+        return '';
+      }
+
+      try {
+        return decodeURIComponent(window.location.hash.slice(1));
+      } catch {
+        return window.location.hash.slice(1);
+      }
+    }
+
+    function setPassphrase(value) {
+      passphrase.value = value;
+      updateUploadButtonState();
+    }
+
+    function getHomeUrl() {
+      const url = new URL(window.location.href);
+      url.search = '';
+      return url.toString();
+    }
+
+    function updateHomeLinkHref() {
+      homeLink.href = getHomeUrl();
+    }
+
+    function extractFileId(value) {
+      if (!value) {
+        return '';
+      }
+
+      const trimmedValue = value.trim();
+      try {
+        const url = new URL(trimmedValue);
+        if (url.hostname === 'tempfile.org') {
+          return url.pathname.split('/').filter(Boolean)[0] || '';
+        }
+      } catch {
+        return trimmedValue;
+      }
+
+      return trimmedValue;
+    }
+
+    function buildDownloadPageUrl(fileId) {
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.searchParams.set('f', fileId);
+      url.hash = encodeURIComponent(passphrase.value);
+      return url.toString();
+    }
+
+    function showUploadLink(link) {
+      const fileId = extractFileId(link);
+      const downloadPageUrl = buildDownloadPageUrl(fileId);
+      const downloadPageLink = document.createElement('a');
+      downloadPageLink.href = downloadPageUrl;
+      downloadPageLink.textContent = downloadPageUrl;
+
+      uploadMessage.textContent = '';
+      uploadMessage.append('SecureTempFile download link: ', downloadPageLink);
+      currentUploadUrl = downloadPageUrl;
+    }
+
+    function showDownloadView() {
+      uploadView.classList.add('hidden');
+      downloadView.classList.remove('hidden');
+    }
+
+    // Prefer the URL hash when present. Download URLs must provide the passphrase in the hash.
+    const hashPassphrase = getHashPassphrase();
+    if (hashPassphrase) {
+      setPassphrase(hashPassphrase);
+    }
+
+    window.addEventListener('hashchange', () => {
+      const hashPassphrase = getHashPassphrase();
+      if (hashPassphrase) {
+        setPassphrase(hashPassphrase);
+      }
+      updateHomeLinkHref();
+    });
+
+    updateHomeLinkHref();
+    passphrase.addEventListener('input', updateUploadButtonState);
+    fileInput.addEventListener('change', updateUploadButtonState);
+    homeLink.addEventListener('click', updateHomeLinkHref);
+    copyUrlBtn.addEventListener('click', copyUploadUrl);
+    btn.addEventListener('click', uploadEncryptedFile);
+
+    async function copyUploadUrl() {
+      try {
+        await navigator.clipboard.writeText(currentUploadUrl);
+        const originalText = copyUrlBtn.textContent;
+        copyUrlBtn.textContent = 'Copied!';
+        setTimeout(() => {
+          copyUrlBtn.textContent = originalText;
+        }, 2000);
+      } catch (e) {
+        alert('Failed to copy: ' + e.message);
+      }
+    }
+
+    // Encryption utilities using Web Crypto API
+    async function deriveKey(password) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(password);
+      const importedKey = await crypto.subtle.importKey('raw', data, 'PBKDF2', false, ['deriveBits']);
+      const bits = await crypto.subtle.deriveBits({
+        name: 'PBKDF2',
+        salt,
+        iterations: 100000,
+        hash: 'SHA-256'
+      }, importedKey, 256);
+      return crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    }
+
+    async function encryptFile(file, password) {
+      if (!password) {
+        throw new Error('No password provided');
+      }
+
+      const key = await deriveKey(password);
+
+      const arrayBuffer = await file.arrayBuffer();
+      const encrypted = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        arrayBuffer
+      );
+      return new File([encrypted], file.name + '.enc', { type: 'application/octet-stream' });
+    }
+
+    async function decryptFile(encryptedData, password) {
+      if (!password) {
+        throw new Error('No password provided');
+      }
+
+      const key = await deriveKey(password);
+
+      try {
+        const decrypted = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv },
+          key,
+          encryptedData
+        );
+        return new Blob([decrypted]);
+      } catch (e) {
+        throw new Error('Decryption failed');
+      }
+    }
+
+    async function uploadEncryptedFile() {
+      if (!fileInput.files.length) {
+        alert('Select a file first');
+        return;
+      }
+
+      try {
+        btn.disabled = true;
+        uploadMessage.textContent = 'Preparing file...';
+
+        const original = fileInput.files[0];
+        let encryptedFile;
+        try {
+          encryptedFile = await encryptFile(original, passphrase.value);
+        } catch (e) {
+          uploadMessage.textContent = 'Encryption failed: ' + e.message;
+          updateUploadButtonState();
+          return;
+        }
+
+        const form = new FormData();
+        form.append('files', encryptedFile, encryptedFile.name);
+        form.append('expiryHours', '24');
+
+        uploadMessage.textContent = 'Uploading...';
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${tempfileBaseUrl}/api/upload/local`);
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            uploadMessage.textContent = 'Uploading... ' + pct + '%';
+          }
+        };
+
+        xhr.onload = () => {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            uploadMessage.textContent = 'Done';
+
+            const link = data.files?.[0]?.url;
+
+            if (link) {
+              showUploadLink(link);
+              copyUrlBtn.classList.remove('hidden');
+            } else {
+              uploadMessage.textContent = 'Upload finished but no download link in response: ' + JSON.stringify(data, null, 2);
+            }
+          } catch (e) {
+            uploadMessage.textContent = 'Upload finished but response parse failed: ' + xhr.responseText;
+          }
+          updateUploadButtonState();
+        };
+
+        xhr.onerror = () => {
+          uploadMessage.textContent = 'Upload failed';
+          updateUploadButtonState();
+        };
+
+        xhr.send(form);
+      } catch (e) {
+        uploadMessage.textContent = 'Error: ' + e.message;
+        updateUploadButtonState();
+      }
+    }
+
+    async function autoDownloadFile(fileId) {
+      try {
+        downloadMessage.textContent = 'Processing...';
+        if (!passphrase.value) {
+          throw new Error('Missing passphrase in URL hash');
+        }
+
+        const downloadLink = `${tempfileBaseUrl}/${fileId}/download`;
+
+        downloadMessage.textContent = 'Fetching file info...';
+        const infoResponse = await fetch(`${tempfileBaseUrl}/api/file/${fileId}`);
+        if (!infoResponse.ok) {
+          throw new Error('Failed to get file info: ' + infoResponse.statusText);
+        }
+        const fileInfo = await infoResponse.json();
+        const filename = (fileInfo.file?.name || fileId).replace(/\.enc$/, '');
+
+        downloadMessage.textContent = 'Downloading file...';
+
+        const response = await fetch(downloadLink);
+        if (!response.ok) {
+          throw new Error('Failed to download file: ' + response.statusText);
+        }
+
+        const encryptedData = new Uint8Array(await response.arrayBuffer());
+
+        downloadMessage.textContent = 'Decrypting file...';
+        const decryptedBlob = await decryptFile(encryptedData, passphrase.value);
+
+        downloadMessage.textContent = 'Saving file...';
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(decryptedBlob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        URL.revokeObjectURL(link.href);
+        document.body.removeChild(link);
+
+        downloadMessage.textContent = 'File decrypted and downloaded successfully';
+      } catch (e) {
+        downloadMessage.textContent = 'Error: ' + e.message;
+      }
+    }
+
+    if (fileIdFromUrl) {
+      showDownloadView();
+      autoDownloadFile(fileIdFromUrl);
+    }
+  </script>
+</body>
+
+</html>
